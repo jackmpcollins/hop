@@ -5,7 +5,6 @@ import { L1Bridge as L1BridgeContract } from '@hop-protocol/core/contracts/L1Bri
 import { L1ERC20Bridge as L1ERC20BridgeContract } from '@hop-protocol/core/contracts/L1ERC20Bridge'
 import { L2Bridge as L2BridgeContract } from '@hop-protocol/core/contracts/L2Bridge'
 import { Transfer } from 'src/db/TransfersDb'
-import { enabledSettleWatcherDestinationChains, enabledSettleWatcherSourceChains } from 'src/config'
 
 export type Config = {
   chainSlug: string
@@ -42,12 +41,6 @@ class SettleBondedWithdrawalWatcher extends BaseWatcher {
   }
 
   checkUnsettledTransferRootsFromDb = async () => {
-    if (enabledSettleWatcherSourceChains.length) {
-      if (!enabledSettleWatcherSourceChains.includes(this.chainSlug)) {
-        return
-      }
-    }
-
     // only process transfer where this bridge is the source chain
     const dbTransferRoots = await this.db.transferRoots.getUnsettledTransferRoots(
       {
@@ -57,15 +50,9 @@ class SettleBondedWithdrawalWatcher extends BaseWatcher {
 
     const promises: Array<Promise<any>> = []
     for (const dbTransferRoot of dbTransferRoots) {
-      const { transferRootHash, transferIds, destinationChainId } = dbTransferRoot
+      const { transferRootHash, transferIds } = dbTransferRoot
       if (!transferIds) {
         throw new Error('expected transferIds list')
-      }
-
-      if (enabledSettleWatcherDestinationChains.length) {
-        if (!enabledSettleWatcherDestinationChains.includes(this.chainIdToSlug(destinationChainId!))) { // eslint-disable-line @typescript-eslint/no-non-null-assertion
-          continue
-        }
       }
 
       // get all db transfer items that belong to root
