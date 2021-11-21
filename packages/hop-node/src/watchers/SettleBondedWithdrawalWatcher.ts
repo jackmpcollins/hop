@@ -82,8 +82,11 @@ class SettleBondedWithdrawalWatcher extends BaseWatcher {
       // then mark transfer root as all settled since there is nothing to settle anymore
       const allBondableTransfersSettled = dbTransfers.every(
         (dbTransfer: Transfer) => {
-          // A transfer should not be settled if it is unbondable
-          return !dbTransfer.isBondable || dbTransfer.withdrawalBondSettled
+          const isAlreadySettled = dbTransfer?.withdrawalBondSettled
+          // Check that isBondable has been explicitly set to false.
+          // Checking !dbTransfer.isBondable is not correct since isBondable can be undefined
+          const isExplicitySetUnbondable = dbTransfer?.isBondable === false
+          return isAlreadySettled || isExplicitySetUnbondable
         }
       )
       if (allBondableTransfersSettled) {
