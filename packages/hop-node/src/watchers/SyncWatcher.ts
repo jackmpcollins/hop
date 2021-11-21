@@ -121,6 +121,8 @@ class SyncWatcher extends BaseWatcher {
         this.logger.debug('done syncing pure handlers. index:', this.syncIndex)
         await this.incompletePollSync()
         this.logger.debug('done syncing incomplete items. index:', this.syncIndex)
+        await this.transferRootSettlementStateSync()
+        this.logger.debug('done syncing transfer root settlement state. index:', this.syncIndex)
         await this.postSyncHandler()
       } catch (err) {
         this.notifier.error(`pollSync error: ${err.message}`)
@@ -614,48 +616,58 @@ class SyncWatcher extends BaseWatcher {
     })
   }
 
-  async checkTransferRootSettledState (transferRootHash: string, totalBondsSettled: BigNumber) {
-    const dbTransferRoot = await this.db.transferRoots.getByTransferRootHash(transferRootHash)
-    if (!dbTransferRoot) {
-      throw new Error('expected db transfer root item')
-    }
+  async transferRootSettlementStateSync () {
+    const settleableTransferRoots: TransferRoot[] = await this.db.transferRoots.getSettleableItems()
 
-    const logger = this.logger.create({ root: transferRootHash })
-    const { transferIds } = dbTransferRoot
-    if (transferIds === undefined || !transferIds.length) {
-      return
-    }
-
-    logger.debug(`transferIds count: ${transferIds.length}`)
-    const dbTransfers: Transfer[] = []
-    for (const transferId of transferIds) {
-      const dbTransfer = await this.db.transfers.getByTransferId(transferId)
-      if (!dbTransfer) {
-        logger.warn(`transfer id ${transferId} db item not found`)
+    await Promise.all(settleableTransferRoots.map(async (transferRoot: TransferRoot) => {
+      const { transferRootHash, transferIds } = transferRoot
+      if (!transferRootHash) {
+        return
       }
-      dbTransfers.push(dbTransfer)
-      const withdrawalBondSettled = dbTransfer?.withdrawalBonded ?? false
-      await this.db.transfers.update(transferId, {
-        withdrawalBondSettled
+
+      const logger = this.logger.create({ root: transferRootHash })
+      logger.info(`checking if fully settled: ${transferRootHash}`)
+
+      if (transferIds === undefined || !transferIds.length) {
+        logger.error('no transferIds associated with the transferRoot')
+        return
+      }
+      const tree = new MerkleTree(transferIds)
+      const computedTransferRootHash = tree.getHexRoot()
+      if (computedTransferRootHash !== transferRootHash) {
+        logger.error(
+          `computed transfer root hash doesn't match. Expected ${transferRootHash}, got ${computedTransferRootHash}. List: ${JSON.stringify(transferIds)}`
+        )
+        return
+      }
+
+      logger.debug(`transferIds count: ${transferIds.length}`)
+      const dbTransfers: Transfer[] = []
+      for (const transferId of transferIds) {
+        const dbTransfer = await this.db.transfers.getByTransferId(transferId)
+        if (!dbTransfer) {
+          logger.warn(`transfer id ${transferId} db item not found`)
+        }
+        dbTransfers.push(dbTransfer)
+        const withdrawalBondSettled = dbTransfer?.withdrawalBonded ?? false
+        await this.db.transfers.update(transferId, {
+          withdrawalBondSettled
+        })
+      }
+      const allBondableTransfersSettled = dbTransfers.every(
+        (dbTransfer: Transfer) => {
+          const isAlreadySettled = dbTransfer?.withdrawalBondSettled
+          // Check that isBondable has been explicitly set to false.
+          // Checking !dbTransfer.isBondable is not correct since isBondable can be undefined
+          const isExplicitySetUnbondable = dbTransfer?.isBondable === false
+          return isAlreadySettled || isExplicitySetUnbondable
+        })
+
+      logger.debug(`all settled: ${allBondableTransfersSettled}`)
+      await this.db.transferRoots.update(transferRootHash, {
+        allSettled: allBondableTransfersSettled
       })
-    }
-    let rootAmountAllSettled = false
-    if (totalBondsSettled) {
-      rootAmountAllSettled = dbTransferRoot?.totalAmount?.eq(totalBondsSettled) ?? false
-    }
-    const allBondableTransfersSettled = dbTransfers.every(
-      (dbTransfer: Transfer) => {
-        const isAlreadySettled = dbTransfer?.withdrawalBondSettled
-        // Check that isBondable has been explicitly set to false.
-        // Checking !dbTransfer.isBondable is not correct since isBondable can be undefined
-        const isExplicitySetUnbondable = dbTransfer?.isBondable === false
-        return isAlreadySettled || isExplicitySetUnbondable
-      })
-    const settled = rootAmountAllSettled || allBondableTransfersSettled
-    logger.debug(`fully settled: ${settled}`)
-    await this.db.transferRoots.update(transferRootHash, {
-      settled
-    })
+    }))
   }
 
   async populateTransferDbItem (transferId: string) {
@@ -1003,7 +1015,6 @@ class SyncWatcher extends BaseWatcher {
       await this.db.transferRoots.update(transferRootHash, {
         transferIds: _transferIds
       })
-      await this.checkTransferRootSettledState(transferRootHash, multipleWithdrawalsSettledTotalAmount)
     }
   }
 
@@ -1185,8 +1196,6 @@ class SyncWatcher extends BaseWatcher {
     if (!transferIds) {
       return
     }
-
-    await this.checkTransferRootSettledState(transferRootHash, totalBondsSettled)
   }
 
   getIsBondable = (

@@ -43,16 +43,19 @@ export type TransferRoot = {
   challenged?: boolean
   challengeExpired?: boolean
   settled?: boolean
+  allSettled?: boolean
   multipleWithdrawalsSettledTxHash?: string
   multipleWithdrawalsSettledTotalAmount?: BigNumber
 }
 
 class TransferRootsDb extends TimestampedKeysDb<TransferRoot> {
   subDbIncompletes: any
+  subDbIncompleteSettles: any
 
   constructor (prefix: string, _namespace?: string) {
     super(prefix, _namespace)
     this.subDbIncompletes = new BaseDb(`${prefix}:incompleteItems`, _namespace)
+    this.subDbIncompleteSettles = new BaseDb(`${prefix}:incompleteSettleItems`, _namespace)
 
     this.ready = false
     this.migrations()
@@ -66,7 +69,7 @@ class TransferRootsDb extends TimestampedKeysDb<TransferRoot> {
   async migrations () {
     // this only needs to be ran once on start up to backfill keys.
     // this function can be removed once all bonders update.
-    this.trackIncompleteItems()
+    this.trackIncompleteSettleItems()
       .then(() => {
         this.ready = true
         this.logger.debug('db ready')
@@ -74,7 +77,7 @@ class TransferRootsDb extends TimestampedKeysDb<TransferRoot> {
       .catch(this.logger.error)
   }
 
-  async trackIncompleteItems () {
+  async trackIncompleteSettleItems () {
     const kv = await this.getKeyValues()
     for (const { key, value } of kv) {
       // backfill items with missing transferRootHash
@@ -82,7 +85,7 @@ class TransferRootsDb extends TimestampedKeysDb<TransferRoot> {
         value.transferRootHash = key
         await this._update(key, value)
       }
-      await this.updateIncompleteItem(value)
+      await this.updateIncompleteSettleItems(value)
     }
   }
 
@@ -104,6 +107,27 @@ class TransferRootsDb extends TimestampedKeysDb<TransferRoot> {
       await this.subDbIncompletes._update(transferRootHash, { transferRootHash })
     } else if (shouldDelete) {
       await this.subDbIncompletes.deleteById(transferRootHash)
+    }
+  }
+
+  async updateIncompleteSettleItems (item: Partial<TransferRoot>) {
+    if (!item) {
+      this.logger.error('expected item', item)
+      return
+    }
+    const { transferRootHash } = item
+    if (!transferRootHash) {
+      this.logger.error('expected transferRootHash', item)
+      return
+    }
+    const isUnmarked = typeof item?.allSettled === undefined
+    const exists = await this.subDbIncompleteSettles.getById(transferRootHash)
+    const shouldUpsert = isUnmarked && !exists
+    const shouldDelete = !isUnmarked && exists
+    if (shouldUpsert) {
+      await this.subDbIncompleteSettles._update(transferRootHash, { transferRootHash })
+    } else if (shouldDelete) {
+      await this.subDbIncompleteSettles.deleteById(transferRootHash)
     }
   }
 
@@ -406,6 +430,7 @@ class TransferRootsDb extends TimestampedKeysDb<TransferRoot> {
         item.committed &&
         item.committedAt &&
         !item.settled &&
+        !item.allSettled &&
         rootSetTimestampOk &&
         bondSettleTimestampOk
       )
@@ -450,6 +475,28 @@ class TransferRootsDb extends TimestampedKeysDb<TransferRoot> {
       }
 
       return this.isItemIncomplete(item)
+    })
+  }
+
+  async getSettleableItems (
+    filter: Partial<TransferRoot> = {}
+  ) {
+    const kv = await this.subDbIncompleteSettles.getKeyValues()
+    const transferRootHashes = kv.map(this.filterTimestampedKeyValues).filter(this.filterExisty)
+    if (!transferRootHashes.length) {
+      return []
+    }
+
+    const batchedItems = await this.batchGetByIds(transferRootHashes)
+    const transferRoots = batchedItems.map(this.normalizeItem)
+    return transferRoots.filter(item => {
+      if (filter.sourceChainId && item.sourceChainId) {
+        if (filter.sourceChainId !== item.sourceChainId) {
+          return false
+        }
+      }
+
+      return true
     })
   }
 }

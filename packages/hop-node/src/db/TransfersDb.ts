@@ -104,35 +104,6 @@ class TransfersDb extends TimestampedKeysDb<Transfer> {
     this.subDbIncompletes = new BaseDb(`${prefix}:incompleteItems`, _namespace)
 
     this.ready = false
-    this.migrations()
-      .then(() => {
-        this.ready = true
-        this.logger.debug('db ready')
-      })
-      .catch(this.logger.error)
-  }
-
-  async migrations () {
-    // this only needs to be ran once on start up to backfill keys.
-    // this function can be removed once all bonders update.
-    this.trackIncompleteItems()
-      .then(() => {
-        this.ready = true
-        this.logger.debug('db ready')
-      })
-      .catch(this.logger.error)
-  }
-
-  async trackIncompleteItems () {
-    const kv = await this.getKeyValues()
-    for (const { key, value } of kv) {
-      // backfill items with missing transferId
-      if (!value.transferId) {
-        value.transferId = key
-        await this._update(key, value)
-      }
-      await this.updateIncompleteItem(value)
-    }
   }
 
   async updateIncompleteItem (item: Partial<Transfer>) {
