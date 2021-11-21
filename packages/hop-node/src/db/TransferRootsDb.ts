@@ -43,7 +43,6 @@ export type TransferRoot = {
   challenged?: boolean
   challengeExpired?: boolean
   settled?: boolean
-  allSettled?: boolean
   multipleWithdrawalsSettledTxHash?: string
   multipleWithdrawalsSettledTotalAmount?: BigNumber
 }
@@ -407,7 +406,6 @@ class TransferRootsDb extends TimestampedKeysDb<TransferRoot> {
         item.committed &&
         item.committedAt &&
         !item.settled &&
-        !item.allSettled &&
         rootSetTimestampOk &&
         bondSettleTimestampOk
       )

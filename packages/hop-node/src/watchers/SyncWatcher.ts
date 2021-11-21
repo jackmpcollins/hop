@@ -651,10 +651,10 @@ class SyncWatcher extends BaseWatcher {
         const isExplicitySetUnbondable = dbTransfer?.isBondable === false
         return isAlreadySettled || isExplicitySetUnbondable
       })
-    const allSettled = rootAmountAllSettled || allBondableTransfersSettled
-    logger.debug(`all settled: ${allSettled}`)
+    const settled = rootAmountAllSettled || allBondableTransfersSettled
+    logger.debug(`fully settled: ${settled}`)
     await this.db.transferRoots.update(transferRootHash, {
-      allSettled
+      settled
     })
   }
 
