@@ -439,6 +439,14 @@ class SyncWatcher extends BaseWatcher {
       isTransferSpent: true,
       transferSpentTxHash: transactionHash
     })
+
+    // Unset the settled flag if the associated root has already been settled
+    const dbTransfer = await this.db.transfers.getByTransferId(transferId)
+    if (dbTransfer?.transferRootHash) {
+      await this.db.transferRoots.update(dbTransfer.transferRootHash, {
+        settled: false
+      })
+    }
   }
 
   async handleWithdrewEvent (event: WithdrewEvent) {
@@ -1167,6 +1175,7 @@ class SyncWatcher extends BaseWatcher {
     logger.debug(`bonder : ${bonder}`)
     logger.debug(`totalBondSettled: ${this.bridge.formatUnits(totalBondsSettled)}`)
     await this.db.transferRoots.update(transferRootHash, {
+      settled: true,
       multipleWithdrawalsSettledTxHash: transactionHash,
       multipleWithdrawalsSettledTotalAmount: totalBondsSettled
     })

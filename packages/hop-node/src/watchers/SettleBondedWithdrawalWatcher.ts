@@ -191,6 +191,7 @@ class SettleBondedWithdrawalWatcher extends BaseWatcher {
     if (transferRootStruct.amountWithdrawn.eq(totalAmount!)) { // eslint-disable-line @typescript-eslint/no-non-null-assertion
       logger.debug(`transfer root amountWithdrawn (${this.bridge.formatUnits(transferRootStruct.amountWithdrawn)}) matches totalAmount (${this.bridge.formatUnits(totalAmount!)}). Marking transfer root as all settled`) // eslint-disable-line @typescript-eslint/no-non-null-assertion
       await this.db.transferRoots.update(transferRootHash, {
+        settled: true,
         allSettled: true
       })
       return
