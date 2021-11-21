@@ -91,7 +91,8 @@ class SettleBondedWithdrawalWatcher extends BaseWatcher {
       )
       if (allBondableTransfersSettled) {
         await this.db.transferRoots.update(transferRootHash!, { // eslint-disable-line @typescript-eslint/no-non-null-assertion
-          allSettled: allBondableTransfersSettled
+          settled: true,
+          allSettled: true
         })
         continue
       }
